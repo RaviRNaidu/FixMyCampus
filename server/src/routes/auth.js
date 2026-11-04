@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import User from '../models/User.js';
+import { authenticate } from '../middleware/auth.js';
+const router=Router(); const safe=u=>({id:u._id,name:u.name,email:u.email,role:u.role});
+const cookieOptions=()=>({httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:process.env.NODE_ENV==='production'?'none':'lax',maxAge:7*24*60*60*1000,path:'/'});
+router.post('/register',async(req,res,next)=>{try{const body=z.object({name:z.string().trim().min(2).max(80),email:z.string().email().max(254),password:z.string().min(8).max(100)}).parse(req.body);const passwordHash=await bcrypt.hash(body.password,12);const user=await User.create({name:body.name,email:body.email.toLowerCase(),passwordHash,role:'student'});const token=jwt.sign({sub:user._id.toString()},process.env.JWT_SECRET,{expiresIn:'7d'});res.cookie('token',token,cookieOptions()).status(201).json({success:true,data:{user:safe(user)}});}catch(e){next(e);}});
+router.post('/login',async(req,res,next)=>{try{const body=z.object({email:z.string().email(),password:z.string().min(1)}).parse(req.body);const user=await User.findOne({email:body.email.toLowerCase()}).select('+passwordHash');const ok=user&&user.isActive&&await bcrypt.compare(body.password,user.passwordHash);if(!ok)return res.status(401).json({success:false,error:{code:'INVALID_CREDENTIALS',message:'Email or password is incorrect.'}});const token=jwt.sign({sub:user._id.toString()},process.env.JWT_SECRET,{expiresIn:'7d'});res.cookie('token',token,cookieOptions()).json({success:true,data:{user:safe(user)}});}catch(e){next(e);}});
+router.post('/logout',(req,res)=>res.clearCookie('token',{...cookieOptions(),maxAge:undefined}).json({success:true,data:{}}));
+router.get('/me',authenticate,(req,res)=>res.json({success:true,data:{user:safe(req.user)}}));
+export default router;
